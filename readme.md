@@ -1,5 +1,15 @@
 A small go program to purge old files, based on ionotify.  Heavily borrowed from https://github.com/fsnotify/fsnotify
 
+## Motivation
+In dealing with constantly churning data, we need to purge some of it to keep services happy and disk utilization under thresholds.  Often, we promise "days" of retention, but implementing that is messy and expensive.  It often looks like: 
+```
+find /path/to/directory/ -mindepth 1 -mtime +5 -delete
+```
+
+This puts a lot of load on the disk, as we're scanning through everything.  It's also inconsistent to the user, as "2 days ago" at noon can look like "2.5 days ago" if we run a purge cron 1x/day. 
+
+The goal of this repo is to PoC using ionotify to remove files within a narrow time band of their expiration.  This should be made relatively efficient using a heap to track update times of files.  Though we may have multiple entries for subsequent writes, I'll need to collect data on if that's actually significant or if we can drop old write records.  Currently, we check the last modified time before deleting a file and place it back in the heap if a subsequent write has occured. 
+
 ## running
 ```
 go run ./cmd watch /tmp/fsnotify/
