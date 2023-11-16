@@ -94,9 +94,6 @@ func watch(paths ...string) {
 
 func evalThePurge(pq *PriorityQueue) {
 	fmt.Printf("the purge %v\n", len(*pq))
-	// if len(*pq) < 1 {
-	// 	return
-	// }
 	for len(*pq) >= 1 && (*pq)[0].priority.Before(time.Now().Add(-10*time.Second)) {
 		item := heap.Pop(pq).(*Item)
 		fmt.Printf(item.priority.Format("15:04:05.0000") + " " + item.value + "\n")
