@@ -3,6 +3,8 @@ package main
 import (
 	"container/heap"
 	"fmt"
+	"log"
+	"os"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -104,7 +106,20 @@ func watchLoop(w *fsnotify.Watcher) {
 		fmt.Printf(item.priority.Format("15:04:05.0000") + " " + item.value + "\n")
 
 		if item.priority.Before(time.Now().Add(-10 * time.Second)) {
-			fmt.Println("removing %v", item.value)
+			fileInfo, err := os.Stat(item.value)
+			// Checks for the error
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			// Gives the modification time
+			modificationTime := fileInfo.ModTime()
+			if modificationTime.After(item.priority) {
+				heap.Push(&pq, &Item{value: item.value, priority: time.Now()})
+				fmt.Println("file modified.  Putting it back. %v", item.value)
+			} else {
+				fmt.Println("removing %v", item.value)
+			}
 		} else {
 			heap.Push(&pq, item)
 		}
