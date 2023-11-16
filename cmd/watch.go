@@ -102,14 +102,19 @@ func watchLoop(w *fsnotify.Watcher) {
 			printTime("%3d %s", i, e)
 			heap.Push(&pq, &Item{value: e.Name, priority: time.Now()})
 		}
-		item := heap.Pop(&pq).(*Item)
-		fmt.Printf(item.priority.Format("15:04:05.0000") + " " + item.value + "\n")
 
-		if item.priority.Before(time.Now().Add(-10 * time.Second)) {
+		for pq[0].priority.Before(time.Now().Add(-10 * time.Second)) {
+			item := heap.Pop(&pq).(*Item)
+			fmt.Printf(item.priority.Format("15:04:05.0000") + " " + item.value + "\n")
 			fileInfo, err := os.Stat(item.value)
 			// Checks for the error
 			if err != nil {
-				log.Fatal(err)
+				// ignore not exists errors.  Multiple writes can put multiple entries on the heap
+				if !os.IsNotExist(err) {
+					log.Fatal(err)
+				} else {
+					continue
+				}
 			}
 
 			// Gives the modification time
@@ -119,9 +124,11 @@ func watchLoop(w *fsnotify.Watcher) {
 				fmt.Println("file modified.  Putting it back. %v", item.value)
 			} else {
 				fmt.Println("removing %v", item.value)
+				e := os.Remove(item.value)
+				if e != nil {
+					log.Fatal(e)
+				}
 			}
-		} else {
-			heap.Push(&pq, item)
 		}
 
 	}
