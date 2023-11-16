@@ -63,8 +63,22 @@ func watch(paths ...string) {
 	}
 	defer w.Close()
 
+	pq := make(PriorityQueue, 0)
+	heap.Init(&pq)
+
+	ticker := time.NewTicker(5 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Println("tick")
+				evalThePurge(&pq)
+			}
+		}
+	}()
+
 	// Start listening for events.
-	go watchLoop(w)
+	go watchLoop(w, &pq)
 
 	// Add all paths from the commandline.
 	for _, p := range paths {
@@ -78,10 +92,43 @@ func watch(paths ...string) {
 	<-make(chan struct{}) // Block forever
 }
 
-func watchLoop(w *fsnotify.Watcher) {
+func evalThePurge(pq *PriorityQueue) {
+	fmt.Printf("the purge %v\n", len(*pq))
+	// if len(*pq) < 1 {
+	// 	return
+	// }
+	for len(*pq) >= 1 && (*pq)[0].priority.Before(time.Now().Add(-10*time.Second)) {
+		item := heap.Pop(pq).(*Item)
+		fmt.Printf(item.priority.Format("15:04:05.0000") + " " + item.value + "\n")
+		fileInfo, err := os.Stat(item.value)
+		// Checks for the error
+		if err != nil {
+			// ignore not exists errors.  Multiple writes can put multiple entries on the heap
+			if !os.IsNotExist(err) {
+				log.Fatal(err)
+			} else {
+				continue
+			}
+		}
+
+		// Gives the modification time
+		modificationTime := fileInfo.ModTime()
+		if modificationTime.After(item.priority) {
+			heap.Push(pq, &Item{value: item.value, priority: time.Now()})
+			fmt.Println("file modified.  Putting it back. %v", item.value)
+		} else {
+			fmt.Println("removing %v", item.value)
+			e := os.Remove(item.value)
+			if e != nil {
+				log.Fatal(e)
+			}
+		}
+	}
+}
+
+func watchLoop(w *fsnotify.Watcher, pq *PriorityQueue) {
 	i := 0
-	pq := make(PriorityQueue, 0)
-	heap.Init(&pq)
+
 	for {
 		select {
 		// Read from Errors.
@@ -100,36 +147,8 @@ func watchLoop(w *fsnotify.Watcher) {
 			// events we've seen.
 			i++
 			printTime("%3d %s", i, e)
-			heap.Push(&pq, &Item{value: e.Name, priority: time.Now()})
+			heap.Push(pq, &Item{value: e.Name, priority: time.Now()})
 		}
-
-		for pq[0].priority.Before(time.Now().Add(-10 * time.Second)) {
-			item := heap.Pop(&pq).(*Item)
-			fmt.Printf(item.priority.Format("15:04:05.0000") + " " + item.value + "\n")
-			fileInfo, err := os.Stat(item.value)
-			// Checks for the error
-			if err != nil {
-				// ignore not exists errors.  Multiple writes can put multiple entries on the heap
-				if !os.IsNotExist(err) {
-					log.Fatal(err)
-				} else {
-					continue
-				}
-			}
-
-			// Gives the modification time
-			modificationTime := fileInfo.ModTime()
-			if modificationTime.After(item.priority) {
-				heap.Push(&pq, &Item{value: item.value, priority: time.Now()})
-				fmt.Println("file modified.  Putting it back. %v", item.value)
-			} else {
-				fmt.Println("removing %v", item.value)
-				e := os.Remove(item.value)
-				if e != nil {
-					log.Fatal(e)
-				}
-			}
-		}
-
+		evalThePurge(pq)
 	}
 }
