@@ -2,12 +2,14 @@ package main
 
 import (
 	"container/heap"
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/open-policy-agent/opa/rego"
 )
 
 type Item struct {
@@ -67,11 +69,11 @@ func watch(paths ...string) {
 	heap.Init(&pq)
 
 	ticker := time.NewTicker(5 * time.Second)
+	evalThePurge(&pq)
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				fmt.Println("tick")
 				evalThePurge(&pq)
 			}
 		}
@@ -92,9 +94,63 @@ func watch(paths ...string) {
 	<-make(chan struct{}) // Block forever
 }
 
+func evalRego(item *Item, query rego.PreparedEvalQuery) bool {
+	ctx := context.TODO()
+	input := map[string]interface{}{
+		"time": item.priority,
+		"path": item.value,
+	}
+	results, err := query.Eval(ctx, rego.EvalInput(input))
+	if err != nil {
+		// Handle evaluation error.
+	} else if len(results) == 0 {
+		// Handle undefined result.
+	} else if result, ok := results[0].Bindings["x"].(bool); !ok {
+		// Handle unexpected result type.
+	} else {
+		// Handle result/decision.
+		fmt.Printf("decision: %v %+v\n", item.value, result)
+		return result
+	}
+	return false
+}
+
 func evalThePurge(pq *PriorityQueue) {
+	module := `
+package example.authz
+
+import future.keywords.if
+import future.keywords.in
+
+
+default allow := false
+
+delayTime := 10
+
+allow if {
+    input.time != null
+    currentTimestamp := time.now_ns() / 1000000000  # Convert nanoseconds to seconds
+    inputTimestamp := time.parse_rfc3339_ns(input.time) / 1000000000
+
+    # Check if the input time is earlier than 10 seconds ago
+    inputTimestamp < currentTimestamp - delayTime
+}
+`
+
+	ctx := context.TODO()
+
+	query, err := rego.New(
+		rego.Query("x = data.example.authz.allow"),
+		rego.Module("example.rego", module),
+	).PrepareForEval(ctx)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	fmt.Printf("the purge %v\n", len(*pq))
-	for len(*pq) >= 1 && (*pq)[0].priority.Before(time.Now().Add(-10*time.Second)) {
+	// for len(*pq) >= 1 && (*pq)[0].priority.Before(time.Now().Add(-10*time.Second)) {
+	for len(*pq) >= 1 && evalRego((*pq)[0], query) {
 		item := heap.Pop(pq).(*Item)
 		fmt.Printf(item.priority.Format("15:04:05.0000") + " " + item.value + "\n")
 		fileInfo, err := os.Stat(item.value)
